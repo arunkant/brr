@@ -2,3 +2,4 @@
 a.out
 brr
 server.c
+*.o
