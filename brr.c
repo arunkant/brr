@@ -17,6 +17,32 @@ void sigchld_handler(int s) {
 	while(waitpid(-1, NULL, WNOHANG) > 0);
 }
 
+void handle_cgi(int client_socket, char *script_path) {
+	pid_t pid = fork();
+	if (pid < 0) {
+		perror("fork failed");
+		exit(EXIT_FAILURE);
+	}
+
+	if (pid == 0) {
+		// this is child process
+		// Redirect stdout to client socket
+		dup2(client_socket, STDOUT_FILENO);
+
+		// Executing the CGI script
+		char *argv[] = { script_path, NULL };
+		char *envp[] = { NULL };
+		execve(script_path, argv, envp);
+
+		// If execve returns then it faild
+		perror("execve failed");
+		exit(EXIT_FAILURE);
+	} else {
+		// This is parant process
+		waitpid(pid, NULL, 0);
+	}
+}
+
 void handle_client(int client_socket) {
 	char buffer[1024];
 		ssize_t bytes_read;
@@ -83,6 +109,12 @@ void handle_client(int client_socket) {
 		// Determine the Content-Type based on file extension
 		char *content_type = "text/plain";
 		char *ext = strrchr(full_path, '.');
+		// Handle CGI requests
+		if (ext && strcmp(ext, ".cgi") == 0) {
+			handle_cgi(client_socket, full_path);
+			return;
+		}
+		// Handle normal file serving
 		if (ext) {
 			if (strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0) {
 				content_type = "text/html";
