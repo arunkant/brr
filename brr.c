@@ -26,7 +26,7 @@ void handle_client(int client_socket) {
 
 		buffer[bytes_read] = '\0';
 
-		printf("Client request recieved in child process %d\n%s\n", getpid(), buffer);
+		printf("Client request recieved in child process %d\n", getpid());
 
 		char request_line[1024];
 		strncpy(request_line, buffer, sizeof(buffer));
@@ -63,6 +63,23 @@ void handle_client(int client_socket) {
 			path = path + 1; // remove leading '/'
 		}
 
+		// Determine the Content-Type based on file extension
+		char *content_type = "text/plain";
+		char *ext = strrchr(path, '.');
+		if (ext) {
+			if (strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0) {
+				content_type = "text/html";
+			} else if (strcmp(ext, ".css") == 0) {
+				content_type = "text/css";
+			} else if (strcmp(ext, ".js") == 0) {
+				content_type = "application/javascript";
+			} else if (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0) {
+				content_type = "image/jpeg";
+			} else if (strcmp(ext, ".png") == 0) {
+				content_type = "image/png";
+			}
+		}
+
 		FILE *file = fopen(path, "r");
 		if (file == NULL) {
 			// File not found, send a 404
@@ -73,10 +90,11 @@ void handle_client(int client_socket) {
 				"<h1>Not Found<h1>";
 			write(client_socket, not_found, strlen(not_found));
 		} else {
-			const char *ok_header =
+			char ok_header[256];
+			sprintf(ok_header,
 				"HTTP/1.1 200 OK\r\n"
-				"Content-Type: text/html\r\n"
-				"\r\n";
+				"Content-Type: %s\r\n"
+				"\r\n", content_type);
 			write(client_socket, ok_header, strlen(ok_header));
 
 			// Read the file and send
@@ -96,6 +114,7 @@ int main()
 	int server_socket, client_socket;
 	struct sockaddr_in server_address, client_address;
 	socklen_t client_address_len = sizeof(client_address);
+	int opt = 1;
 
 	server_socket = socket(AF_INET, SOCK_STREAM, 0);
 	if (server_socket < 0)
@@ -103,6 +122,13 @@ int main()
 		perror("socket creation failed");
 		exit(EXIT_FAILURE);
 	}
+
+	// Set SO_REUSEADDR to allow the socket to be reused immediately after shutdown
+	if(setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
+		perror("setsockopt failed");
+		exit(EXIT_FAILURE);
+	}
+
 	memset(&server_address, 0, sizeof(server_address));
 	server_address.sin_family = AF_INET;
 	server_address.sin_port = htons(PORT);
