@@ -5,8 +5,12 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <signal.h>
+#include <limits.h>
+
+#define SERVER_ROOT "."
 
 static int PORT = 8080;
+char server_root_path[PATH_MAX];
 
 void sigchld_handler(int s) {
 	// wait for all dead processes without blocking the parant
@@ -56,16 +60,29 @@ void handle_client(int client_socket) {
 		}
 
 		// printf("Method: %s, Path: %s, Protocol: %s\n", method, path, protocol);
-
+		char requested_path[PATH_MAX];
 		if (strcmp(path, "/") == 0) {
-			path = "index.html";
+			strcpy(requested_path, "index.html");
 		} else {
-			path = path + 1; // remove leading '/'
+			strcpy(requested_path, path + 1); // remove leading '/'
+		}
+
+		// Security check: Resolve the path and check if it is within the server root
+		char full_path[PATH_MAX];
+		if (realpath(requested_path, full_path) == NULL || 
+			strncmp(full_path, server_root_path, strlen(server_root_path)) != 0) {
+			const char *forbidden_response = 
+				"HTTP/1.1 403 Forbidden\r\n"
+				"\r\n"
+				"<h1>403 Forbidden</h1>\r\n";
+			write(client_socket, forbidden_response, strlen(forbidden_response));
+			close(client_socket);
+			return;
 		}
 
 		// Determine the Content-Type based on file extension
 		char *content_type = "text/plain";
-		char *ext = strrchr(path, '.');
+		char *ext = strrchr(full_path, '.');
 		if (ext) {
 			if (strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0) {
 				content_type = "text/html";
@@ -80,7 +97,7 @@ void handle_client(int client_socket) {
 			}
 		}
 
-		FILE *file = fopen(path, "r");
+		FILE *file = fopen(full_path, "r");
 		if (file == NULL) {
 			// File not found, send a 404
 			const char *not_found = 
@@ -115,6 +132,11 @@ int main()
 	struct sockaddr_in server_address, client_address;
 	socklen_t client_address_len = sizeof(client_address);
 	int opt = 1;
+
+	//identify server root path
+	if (realpath(SERVER_ROOT, server_root_path) == NULL) {
+		perror("failed to get server root path");
+	}
 
 	server_socket = socket(AF_INET, SOCK_STREAM, 0);
 	if (server_socket < 0)
