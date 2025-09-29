@@ -4,5 +4,7 @@ echo "Content-Type: text/html"
 echo ""
 echo "<h1>Hello from CGI</h1>"
 read body
-echo "request body:"
+echo "<h2>request body:</h2>"
+echo "<p>"
 echo $body
+echo "</p>"
