@@ -17,7 +17,14 @@ void sigchld_handler(int s) {
 	while(waitpid(-1, NULL, WNOHANG) > 0);
 }
 
-void handle_cgi(int client_socket, char *script_path) {
+void handle_cgi(int client_socket, char *script_path, char *post_data) {
+	int pipefd[2];
+
+	if(pipe(pipefd) == -1) {
+		perror("pipe failed");
+		return;
+	}
+
 	pid_t pid = fork();
 	if (pid < 0) {
 		perror("fork failed");
@@ -26,6 +33,10 @@ void handle_cgi(int client_socket, char *script_path) {
 
 	if (pid == 0) {
 		// this is child process
+		close(pipefd[1]); // close write end of pipe
+
+		// Redirect stdin to the read end of the pipe
+		dup2(pipefd[0], STDIN_FILENO);
 		// Redirect stdout to client socket
 		dup2(client_socket, STDOUT_FILENO);
 
@@ -39,6 +50,11 @@ void handle_cgi(int client_socket, char *script_path) {
 		exit(EXIT_FAILURE);
 	} else {
 		// This is parant process
+		close(pipefd[0]); // close read end of the pipe
+		if (post_data) {
+			write(pipefd[1], post_data, strlen(post_data));
+		}
+		close(pipefd[1]); // Close to signal end of data
 		waitpid(pid, NULL, 0);
 	}
 }
@@ -93,6 +109,7 @@ void handle_client(int client_socket) {
 			strcpy(requested_path, path + 1); // remove leading '/'
 		}
 
+
 		// Security check: Resolve the path and check if it is within the server root
 		char full_path[PATH_MAX];
 		if (realpath(requested_path, full_path) == NULL || 
@@ -106,12 +123,28 @@ void handle_client(int client_socket) {
 			return;
 		}
 
+		// Check if post data
+		char *post_data = NULL;
+		if (strcmp(method, "POST") == 0) {
+			char *content_length_header = strstr(buffer, "Content-Length: "); // get position for calculating content-length
+			content_length_header += strlen("Content-Length: ");
+			int content_length = atoi(content_length_header);
+			post_data = strstr(buffer, "\r\n\r\n"); // find the request body
+			if (post_data) {
+				post_data += strlen("\r\n\r\n");
+				if ((post_data - buffer) + content_length < sizeof(buffer)) {
+					post_data[content_length] = '\0';
+				}
+			}
+		}
+		
+
 		// Determine the Content-Type based on file extension
 		char *content_type = "text/plain";
 		char *ext = strrchr(full_path, '.');
 		// Handle CGI requests
 		if (ext && strcmp(ext, ".cgi") == 0) {
-			handle_cgi(client_socket, full_path);
+			handle_cgi(client_socket, full_path, post_data);
 			return;
 		}
 		// Handle normal file serving
