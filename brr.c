@@ -159,6 +159,25 @@ void handle_client(int client_socket) {
     printf("Client request recieved in child process %d\n", getpid());
 
     HttpRequest request = parse_request(buffer);
+	int content_length = 0;
+	if (strcmp(request.method, "POST") == 0) {
+		for (int i = 0; i < request.header_count; i++) {
+			if (strcasecmp(request.headers[i].key, "Content-Length") == 0) {
+				content_length = atoi(request.headers[i].value);
+				break;
+			}
+		}
+	}
+
+	if (content_length > 0 && request.body) {
+		request.body_len = (size_t)content_length;
+		if ((request.body - buffer) + content_length < sizeof(buffer)) {
+			request.body[content_length] = '\0';
+		}
+	} else {
+		request.body = NULL;
+		request.body_len = 0;
+	}
 	// printf("in handle_client: %s, %s, %s\n", request.method, request.path, request.protocol);
 
     // printf("Method: %s, Path: %s, Protocol: %s\n", method, path, protocol);
